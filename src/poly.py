@@ -1,3 +1,5 @@
+import math
+
 '''
 Exact polynomial arithmetic over the rationals.
 
@@ -105,6 +107,105 @@ class Poly:
     >>> print(Poly([1, 0, 2]))
     2x**2 + 1
     '''
+    def __init__(self, coeffs):
+        self.coeffs = list(coeffs)
+        if not self.coeffs:
+            self.coeffs = [0]
+        while len(self.coeffs) > 1 and self.coeffs[-1] == 0:
+            self.coeffs.pop()
+
+    def __repr__(self):
+        return f'Poly({self.coeffs!r})'
+
+    def __str__(self):
+        terms = []
+        for i in range(len(self.coeffs) - 1, -1, -1):
+            c = self.coeffs[i]
+            if c == 0:
+                continue
+            if i == 0:
+                term = str(abs(c))
+            elif i == 1:
+                term = ('' if abs(c) == 1 else str(abs(c))) + 'x'
+            else:
+                term = ('' if abs(c) == 1 else str(abs(c))) + f'x**{i}'
+            if not terms:
+                terms.append(('-' if c < 0 else '') + term)
+            else:
+                terms.append((' - ' if c < 0 else ' + ') + term)
+        return ''.join(terms) if terms else '0'
+
+    def __eq__(self, other):
+        if not isinstance(other, Poly):
+            return NotImplemented
+        return self.coeffs == other.coeffs
+
+    def __add__(self, other):
+        if not isinstance(other, Poly):
+            return NotImplemented
+        coeffs = []
+        for i in range(max(len(self.coeffs), len(other.coeffs))):
+            a = self.coeffs[i] if i < len(self.coeffs) else 0
+            b = other.coeffs[i] if i < len(other.coeffs) else 0
+            coeffs.append(a + b)
+        return Poly(coeffs)
+
+    def __neg__(self):
+        return Poly([-c for c in self.coeffs])
+
+    def __sub__(self, other):
+        if not isinstance(other, Poly):
+            return NotImplemented
+        return self + (-other)
+
+    def __mul__(self, other):
+        if not isinstance(other, Poly):
+            return NotImplemented
+        return self.mul_naive(other)
+
+    def __pow__(self, other):
+        if not isinstance(other, int):
+            return NotImplemented
+        if other < 0:
+            raise ValueError
+        result = Poly([1])
+        for _ in range(other):
+            result = result * self
+        return result
+
+    def __call__(self, x):
+        return self.eval_horner(x)
+
+    def derivative(self):
+        return Poly([
+            i * self.coeffs[i]
+            for i in range(1, len(self.coeffs))
+        ])
+
+    def __iadd__(self, other):
+        if not isinstance(other, Poly):
+            return NotImplemented
+        self.coeffs = (self + other).coeffs
+        return self
+
+    def __isub__(self, other):
+        if not isinstance(other, Poly):
+            return NotImplemented
+        self.coeffs = (self - other).coeffs
+        return self
+
+    def __imul__(self, other):
+        if not isinstance(other, Poly):
+            return NotImplemented
+        self.coeffs = (self * other).coeffs
+        return self
+
+    def __ipow__(self, other):
+        if not isinstance(other, int):
+            return NotImplemented
+        self.coeffs = (self ** other).coeffs
+        return self
+
     def eval_naive(self, x):
         '''
         Evaluate by summing a_i * x**i one term at a time.  The
@@ -155,6 +256,18 @@ class Poly:
                 out[i + j] += ai * bj
         return Poly(out)
 
+    def mul_karatsuba(self, other):
+        if not isinstance(other, Poly):
+            return NotImplemented
+        return Poly(_karatsuba(self.coeffs, other.coeffs))
+
+
+def pad_polynomial(poly, size):
+    padded_poly = poly[:]
+    while len(padded_poly) < size:
+        padded_poly.append(0)
+    return padded_poly
+
 
 def _karatsuba(a, b):
     '''
@@ -179,3 +292,35 @@ def _karatsuba(a, b):
     >>> _karatsuba([0], [1, 2, 3])
     [0, 0, 0]
     '''
+    if not a or not b:
+        return [0]
+    n = max(len(a), len(b))
+    if (n & (n - 1)) != 0:
+        n = 1 << (math.floor(math.log2(n)) + 1)
+    a_padded = pad_polynomial(a, n)
+    b_padded = pad_polynomial(b, n)
+    if n == 1:
+        return [a_padded[0] * b_padded[0]]
+    m = n // 2
+    a0 = a_padded[:m]
+    a1 = a_padded[m:]
+    b0 = b_padded[:m]
+    b1 = b_padded[m:]
+    z0 = _karatsuba(a0, b0)
+    z2 = _karatsuba(a1, b1)
+    a0_plus_a1 = [a0[i] + a1[i] for i in range(m)]
+    b0_plus_b1 = [b0[i] + b1[i] for i in range(m)]
+    z1 = _karatsuba(a0_plus_a1, b0_plus_b1)
+    middle_term = [
+        z1[i] - z0[i] - z2[i]
+        for i in range(len(z1))
+    ]
+    result = [0] * (2 * n)
+    for i in range(len(z0)):
+        result[i] += z0[i]
+    for i in range(len(middle_term)):
+        result[m + i] += middle_term[i]
+    for i in range(len(z2)):
+        result[2 * m + i] += z2[i]
+    ans = result[:len(a) + len(b) - 1]
+    return ans
